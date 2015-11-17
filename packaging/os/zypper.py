@@ -135,8 +135,23 @@ def get_current_version(m, packages):
     return current_version
 
 
+def names_to_paths(names, paths):
+    """
+    Map package names to paths if these are URLs/local paths but
+    use the package name otherwise
+    """
+    packages = []
+    for p in names:
+        if p in paths:
+            packages.append(paths[p])
+        else:
+            packages.append(p)
+    return packages
+
+
 # Function used to find out if a package is currently installed.
 def get_package_state(m, packages):
+    paths = {}
     for i in range(0, len(packages)):
         # Check state of a local rpm-file
         if ".rpm" in packages[i]:
@@ -149,6 +164,7 @@ def get_package_state(m, packages):
             cmd = ['/bin/rpm', '--query', '--qf', '%{NAME}', '--package']
             cmd.append(package)
             rc, stdout, stderr = m.run_command(cmd, check_rc=False)
+            paths[stdout] = package
             packages[i] = stdout
 
     cmd = ['/bin/rpm', '--query', '--qf', 'package %{NAME} is installed\n']
@@ -169,10 +185,10 @@ def get_package_state(m, packages):
         else:
             installed_state[package] = False
 
-    return installed_state
+    return (installed_state, paths)
 
 # Function used to make sure a package is present.
-def package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper):
+def package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper, paths):
     packages = []
     for package in name:
         if package not in installed_state or installed_state[package] is False:
@@ -186,7 +202,7 @@ def package_present(m, name, installed_state, package_type, disable_gpg_check, d
         # add install parameter
         if disable_recommends and not old_zypper:
             cmd.append('--no-recommends')
-        cmd.extend(packages)
+        cmd.extend(names_to_paths(packages, paths))
         rc, stdout, stderr = m.run_command(cmd, check_rc=False)
 
         if rc == 0:
@@ -202,10 +218,10 @@ def package_present(m, name, installed_state, package_type, disable_gpg_check, d
     return (rc, stdout, stderr, changed)
 
 # Function used to make sure a package is the latest available version.
-def package_latest(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper):
+def package_latest(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper, paths):
 
     # first of all, make sure all the packages are installed
-    (rc, stdout, stderr, changed) = package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper)
+    (rc, stdout, stderr, changed) = package_present(m, name, installed_state, package_type, disable_gpg_check, disable_recommends, old_zypper, paths)
 
     # return if an error occured while installation
     # otherwise error messages will be lost and user doesn`t see any error
@@ -299,15 +315,15 @@ def main():
         old_zypper = True
 
     # Get package state
-    installed_state = get_package_state(module, name)
+    installed_state, paths = get_package_state(module, name)
 
     # Perform requested action
     if state in ['installed', 'present']:
-        (rc, stdout, stderr, changed) = package_present(module, name, installed_state, type_, disable_gpg_check, disable_recommends, old_zypper)
+        (rc, stdout, stderr, changed) = package_present(module, name, installed_state, type_, disable_gpg_check, disable_recommends, old_zypper, paths)
     elif state in ['absent', 'removed']:
         (rc, stdout, stderr, changed) = package_absent(module, name, installed_state, type_, old_zypper)
     elif state == 'latest':
-        (rc, stdout, stderr, changed) = package_latest(module, name, installed_state, type_, disable_gpg_check, disable_recommends, old_zypper)
+        (rc, stdout, stderr, changed) = package_latest(module, name, installed_state, type_, disable_gpg_check, disable_recommends, old_zypper, paths)
 
     if rc != 0:
         if stderr:
