@@ -145,9 +145,14 @@ def get_package_state(m, packages):
                 stderr = "No Package file matching '%s' found on system" % package
                 m.fail_json(msg=stderr, rc=1)
             # Get packagename from rpm file
-            cmd = ['/bin/rpm', '--query', '--qf', '%{NAME}', '--package']
+            cmd = ['/bin/rpm', '--nosignature', '--query', '--qf', '%{NAME}', '--package']
             cmd.append(package)
             rc, stdout, stderr = m.run_command(cmd, check_rc=False)
+            if stderr:
+                m.fail_json(msg="Getting state for package %s failed" % package,
+                            stderr=stderr,
+                            stdout=stdout,
+                            rc=1)
             packages[i] = stdout
 
     cmd = ['/bin/rpm', '--query', '--qf', 'package %{NAME} is installed\n']
