@@ -237,12 +237,9 @@ def package_latest(m, name, installed_state, package_type, disable_gpg_check, di
     if disable_gpg_check:
         cmd.append('--no-gpg-checks')
 
-    if old_zypper:
-        cmd.extend(['install', '--auto-agree-with-licenses', '-t', package_type])
-    else:
-        cmd.extend(['update', '--auto-agree-with-licenses', '-t', package_type])
+    cmd.extend(['install', '--auto-agree-with-licenses', '-t', package_type])
 
-    cmd.extend(name)
+    cmd.extend(names_to_paths(name, paths))
     rc, stdout, stderr = m.run_command(cmd, check_rc=False)
 
     # if we've already made a change, we don't have to check whether a version changed
