@@ -83,9 +83,10 @@ EXAMPLES = '''
 
 REPO_OPTS = ['alias', 'name', 'priority', 'enabled', 'autorefresh', 'gpgcheck']
 
-def _parse_repos(module):
-    """parses the output of zypper -x lr and returns a parse repo dictionary"""
-    cmd = ['/usr/bin/zypper', '-x', 'lr']
+def _parse_repos(module, ident):
+    """parses the output of zypper -x lr <ident> and return a parse repo dictionary"""
+    cmd = ['/usr/bin/zypper', '-x', 'lr', ident]
+
     from xml.dom.minidom import parseString as parseXML
     rc, stdout, stderr = module.run_command(cmd, check_rc=False)
     if rc == 0:
@@ -113,28 +114,35 @@ def _parse_repos(module):
 
 
 def repo_exists(module, **kwargs):
-
-    def repo_subset(realrepo, repocmp):
+    def repo_changes(realrepo, repocmp):
         for k in repocmp:
             if k not in realrepo:
-                return False
+                return True
 
         for k, v in realrepo.items():
             if k in repocmp:
                 if v.rstrip("/") != repocmp[k].rstrip("/"):
-                    return False
-        return True
+                    return True
+        return False
 
-    repos = _parse_repos(module)
-    for repo in repos:
-        if repo_subset(repo, kwargs):
-            return True
-    return False
+    repos = []
+    # Identify a repo by name, alias or url (in that order)
+    name = kwargs.get('name', None) or kwargs.get('alias', None) or kwargs.get('url', None)
+    if name:
+        repos = _parse_repos(module, name)
 
+    if len(repos) == 1:
+        # Found an existing repo, look for changes
+        has_changes = repo_changes(repos[0], kwargs)
+        return (True, has_changes)
+    elif len(repos) == 0:
+        # Repo does not exist yet
+        return (False, False)
+    else:
+        module.fail_json(msg='More than one repo matched "%s": "%s"' % (name, repos))
 
-def add_repo(module, repo, alias, description, disable_gpg_check, refresh):
+def modify_repo(module, repo, alias, description, disable_gpg_check, refresh, remove_first):
     cmd = ['/usr/bin/zypper', 'ar', '--check', '-t', 'plaindir']
-
     if description:
         cmd.extend(['--name', description])
 
@@ -149,12 +157,13 @@ def add_repo(module, repo, alias, description, disable_gpg_check, refresh):
     if not repo.endswith('.repo'):
         cmd.append(alias)
 
+    if remove_first:
+        remove_repo(module, repo, alias)
+
     rc, stdout, stderr = module.run_command(cmd, check_rc=False)
     changed = rc == 0
     if rc == 0:
         changed = True
-    elif 'already exists. Please use another alias' in stderr:
-        changed = False
     else:
         if stderr:
             module.fail_json(msg=stderr)
@@ -221,18 +230,16 @@ def main():
         if not name and state == "present":
             module.fail_json(msg='Name required when adding non-repo files:')
 
-    if repo and repo.endswith('.repo'):
-        exists = repo_exists(module, url=repo, alias=name)
-    elif repo:
-        exists = repo_exists(module, url=repo)
+    if repo and repo.endswith('.repo') or name:
+        exists, mod = repo_exists(module, url=repo, alias=name)
     else:
-        exists = repo_exists(module, alias=name)
+        exists, mod = repo_exists(module, url=repo)
 
     if state == 'present':
-        if exists:
+        if exists and not mod:
             exit_unchanged()
 
-        changed = add_repo(module, repo, name, description, disable_gpg_check, refresh)
+        changed = modify_repo(module, repo, name, description, disable_gpg_check, refresh, mod)
     elif state == 'absent':
         if not exists:
             exit_unchanged()
