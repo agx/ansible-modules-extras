@@ -83,15 +83,6 @@ EXAMPLES = '''
 
 REPO_OPTS = ['alias', 'name', 'priority', 'enabled', 'autorefresh', 'gpgcheck']
 
-def zypper_version(module):
-    """Return (rc, message) tuple"""
-    cmd = ['/usr/bin/zypper', '-V']
-    rc, stdout, stderr = module.run_command(cmd, check_rc=False)
-    if rc == 0:
-        return rc, stdout
-    else:
-        return rc, stderr
-
 def _parse_repos(module):
     """parses the output of zypper -x lr and returns a parse repo dictionary"""
     cmd = ['/usr/bin/zypper', '-x', 'lr']
@@ -120,25 +111,8 @@ def _parse_repos(module):
             d['stdout'] = stdout
         module.fail_json(msg='Failed to execute "%s"' % " ".join(cmd), **d)
 
-def _parse_repos_old(module):
-    """parses the output of zypper sl and returns a parse repo dictionary"""
-    cmd = ['/usr/bin/zypper', 'sl']
-    repos = []
-    rc, stdout, stderr = module.run_command(cmd, check_rc=True)
-    for line in stdout.split('\n'):
-        matched = re.search(r'\d+\s+\|\s+(?P<enabled>\w+)\s+\|\s+(?P<autorefresh>\w+)\s+\|\s+(?P<type>\w+)\s+\|\s+(?P<name>\w+)\s+\|\s+(?P<url>.*)', line)
-        if matched == None:
-            continue
 
-        m = matched.groupdict()
-        m['alias']= m['name']
-        m['priority'] = 100
-        m['gpgcheck'] = 1
-        repos.append(m)
-
-    return repos
-
-def repo_exists(module, old_zypper, **kwargs):
+def repo_exists(module, **kwargs):
 
     def repo_subset(realrepo, repocmp):
         for k in repocmp:
@@ -151,32 +125,20 @@ def repo_exists(module, old_zypper, **kwargs):
                     return False
         return True
 
-    if old_zypper:
-        repos = _parse_repos_old(module)
-    else:
-        repos = _parse_repos(module)
-
+    repos = _parse_repos(module)
     for repo in repos:
         if repo_subset(repo, kwargs):
             return True
     return False
 
 
-def add_repo(module, repo, alias, description, disable_gpg_check, old_zypper, refresh):
-    if old_zypper:
-        cmd = ['/usr/bin/zypper', 'sa']
-    else:
-        cmd = ['/usr/bin/zypper', 'ar', '--check']
-
-    if repo.startswith("file:/") and old_zypper:
-        cmd.extend(['-t', 'Plaindir'])
-    else:
-        cmd.extend(['-t', 'plaindir'])
+def add_repo(module, repo, alias, description, disable_gpg_check, refresh):
+    cmd = ['/usr/bin/zypper', 'ar', '--check', '-t', 'plaindir']
 
     if description:
         cmd.extend(['--name', description])
 
-    if disable_gpg_check and not old_zypper:
+    if disable_gpg_check:
         cmd.append('--no-gpgcheck')
 
     if refresh:
@@ -194,7 +156,6 @@ def add_repo(module, repo, alias, description, disable_gpg_check, old_zypper, re
     elif 'already exists. Please use another alias' in stderr:
         changed = False
     else:
-        #module.fail_json(msg=stderr if stderr else stdout)
         if stderr:
             module.fail_json(msg=stderr)
         else:
@@ -203,12 +164,8 @@ def add_repo(module, repo, alias, description, disable_gpg_check, old_zypper, re
     return changed
 
 
-def remove_repo(module, repo, alias, old_zypper):
-
-    if old_zypper:
-        cmd = ['/usr/bin/zypper', 'sd']
-    else:
-        cmd = ['/usr/bin/zypper', 'rr']
+def remove_repo(module, repo, alias):
+    cmd = ['/usr/bin/zypper', 'rr']
     if alias:
         cmd.append(alias)
     else:
@@ -251,13 +208,6 @@ def main():
     def exit_unchanged():
         module.exit_json(changed=False, repo=repo, state=state, name=name)
 
-    rc, out = zypper_version(module)
-    match = re.match(r'zypper\s+(\d+)\.(\d+)\.(\d+)', out)
-    if not match or  int(match.group(1)) > 0:
-        old_zypper = False
-    else:
-        old_zypper = True
-
     # Check run-time module parameters
     if state == 'present' and not repo:
         module.fail_json(msg='Module option state=present requires repo')
@@ -272,22 +222,22 @@ def main():
             module.fail_json(msg='Name required when adding non-repo files:')
 
     if repo and repo.endswith('.repo'):
-        exists = repo_exists(module, old_zypper, url=repo, alias=name)
+        exists = repo_exists(module, url=repo, alias=name)
     elif repo:
-        exists = repo_exists(module, old_zypper, url=repo)
+        exists = repo_exists(module, url=repo)
     else:
-        exists = repo_exists(module, old_zypper, alias=name)
+        exists = repo_exists(module, alias=name)
 
     if state == 'present':
         if exists:
             exit_unchanged()
 
-        changed = add_repo(module, repo, name, description, disable_gpg_check, old_zypper, refresh)
+        changed = add_repo(module, repo, name, description, disable_gpg_check, refresh)
     elif state == 'absent':
         if not exists:
             exit_unchanged()
 
-        changed = remove_repo(module, repo, name, old_zypper)
+        changed = remove_repo(module, repo, name)
 
     module.exit_json(changed=changed, repo=repo, state=state)
 
