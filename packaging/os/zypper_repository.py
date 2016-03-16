@@ -121,7 +121,7 @@ def repo_exists(module, **kwargs):
 
         for k, v in realrepo.items():
             if k in repocmp:
-                if v.rstrip("/") != repocmp[k].rstrip("/"):
+                if (v or "").rstrip("/") != (repocmp[k] or "").rstrip("/"):
                     return True
         return False
 
